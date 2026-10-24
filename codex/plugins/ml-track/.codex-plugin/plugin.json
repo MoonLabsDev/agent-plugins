@@ -1,0 +1,21 @@
+{
+  "name": "ml-track",
+  "version": "0.3.0+codex.20261024120000",
+  "description": "Book Codex turn time and token cost onto MoonLabs projects",
+  "author": {
+    "name": "MoonLabs"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ML Track for Codex",
+    "shortDescription": "Track Codex time and token cost.",
+    "longDescription": "Track completed Codex turns with local deduplication, project binding and reviewed backfill.",
+    "defaultPrompt": "Show my ml-track status and help me configure Codex tracking.",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "developerName": "MoonLabs",
+    "category": "Productivity"
+  }
+}

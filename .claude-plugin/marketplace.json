@@ -1,0 +1,12 @@
+{
+  "name": "moonlabs",
+  "owner": { "name": "MoonLabs" },
+  "description": "MoonLabs agent plugins for Claude Code.",
+  "plugins": [
+    {
+      "name": "ml-track",
+      "source": "./claude/plugins/ml-track",
+      "description": "Book Claude Code time and token cost onto a MoonLabs time-tracker project"
+    }
+  ]
+}
