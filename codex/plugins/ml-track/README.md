@@ -1,10 +1,10 @@
 # ML Track for Codex
 
-Native Codex port of `plugin/claude/ml-track` (source snapshot 0.3.0).
+Native Codex port of `plugin/claude/ml-track` (source snapshot 0.4.0).
 The Claude package remains independent. The bundled API, spool, retry,
 payload, grouping and CLI logic retain the Claude implementation's contract.
-Codex-specific code is in `lib/paths.mjs`, `lib/transcript.mjs`, the skills,
-pricing table and hooks. Port shared fixes deliberately to both packages.
+Codex-specific code is in `lib/paths.mjs`, `lib/transcript.mjs`, the skills
+and hooks. Port shared fixes deliberately to both packages.
 
 ## Install
 
@@ -82,10 +82,18 @@ spooled with.
   identified from these rollouts.
 - Subagent usage is not collected in this version; backfill explicitly reports
   subagentDataAvailable=false. Costs are main-thread estimates.
-- Prices GPT-6 Astra and GPT-5.5 at standard short-context API list rates,
-  checked 2026-09-06. Fast mode, long-context, regional, tool and subscription
-  charges are not modeled. Other model names remain visible as unpriced with
-  zero cost; backfill lists them. Extend pricing-table.json with verified rates.
+- Bookings carry times and token counts only, per model: input, output,
+  cached input, cache writes (as the short write, the only one the rollout
+  reports) and, from `token_usage_record`, each response's own usage. The
+  tracker prices them with its model prices (Instanz → KI-Preise) when it
+  stores the booking, including long context (above 272K prompt tokens for
+  the OpenAI models that list it), which applies per response. Older rollouts
+  that only carry cumulative `token_count` deltas do not reveal one request's
+  prompt size; their turns are priced at the short-context rates, which can
+  understate a long-context request. A model the tracker has no price for is
+  booked with its tokens at zero cost and recomputed once an instance admin
+  adds the price. Fast mode, regional, tool and subscription charges are not
+  modeled.
 - Hook transcript paths are preferred; backfill can discover JSONL rollouts in
   CODEX_HOME/sessions or archived_sessions, or accept --transcript explicitly.
   Non-JSONL/paginated storage is not supported; transcript formats may change.

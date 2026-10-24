@@ -56,14 +56,27 @@ export function parseTurns(text, { idleThresholdSeconds = 120, completedTurnId }
   for (const t of turns.values()) {
     if (!t.complete) continue
     const buckets = new Map()
-    for (const item of t.records.length ? t.records : t.fallback) {
+    // A token_usage_record is one response, so its usage is one request's and
+    // a long-context price can apply to it (priced by the server). A token_count
+    // delta may span several requests: those buckets carry no `requests` and
+    // stay at the short rates.
+    const perRequest = t.records.length > 0
+    for (const item of perRequest ? t.records : t.fallback) {
       const key = `${item.model}|${item.effort}`
-      const b = buckets.get(key) ?? { model: item.model, effort: item.effort, origin: 'main', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0, cacheWrite1hTokens: 0 }
+      const b = buckets.get(key) ?? { model: item.model, effort: item.effort, origin: 'main', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0, cacheWrite1hTokens: 0, ...(perRequest ? { requests: [] } : {}) }
       const u = item.usage
-      b.inputTokens += Math.max(0, n(u.input_tokens) - n(u.cached_input_tokens) - n(u.cache_write_input_tokens))
-      b.outputTokens += n(u.output_tokens) // reasoning_output_tokens is already included.
-      b.cacheReadTokens += n(u.cached_input_tokens)
-      b.cacheWrite5mTokens += n(u.cache_write_input_tokens)
+      const request = {
+        inputTokens: Math.max(0, n(u.input_tokens) - n(u.cached_input_tokens) - n(u.cache_write_input_tokens)),
+        outputTokens: n(u.output_tokens), // reasoning_output_tokens is already included.
+        cacheReadTokens: n(u.cached_input_tokens),
+        cacheWrite5mTokens: n(u.cache_write_input_tokens),
+        cacheWrite1hTokens: 0,
+      }
+      b.inputTokens += request.inputTokens
+      b.outputTokens += request.outputTokens
+      b.cacheReadTokens += request.cacheReadTokens
+      b.cacheWrite5mTokens += request.cacheWrite5mTokens
+      if (perRequest) b.requests.push(request)
       buckets.set(key, b)
     }
     const waits = [], pending = new Map()

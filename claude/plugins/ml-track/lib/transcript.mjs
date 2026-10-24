@@ -124,12 +124,24 @@ function accumulateUsage(map, entry, origin = 'main') {
     model, effort, origin,
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
     cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
+    requests: [],
   }
-  bucket.inputTokens += usage.input_tokens ?? 0
-  bucket.outputTokens += usage.output_tokens ?? 0
-  bucket.cacheReadTokens += usage.cache_read_input_tokens ?? 0
-  bucket.cacheWrite5mTokens += creation.ephemeral_5m_input_tokens ?? 0
-  bucket.cacheWrite1hTokens += creation.ephemeral_1h_input_tokens ?? 0
+  // One assistant entry is one API request, so its usage is that request's
+  // own: kept beside the sums because a long-context price applies per
+  // request, by the size of that request's prompt (priced by the server).
+  const request = {
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheWrite5mTokens: creation.ephemeral_5m_input_tokens ?? 0,
+    cacheWrite1hTokens: creation.ephemeral_1h_input_tokens ?? 0,
+  }
+  bucket.inputTokens += request.inputTokens
+  bucket.outputTokens += request.outputTokens
+  bucket.cacheReadTokens += request.cacheReadTokens
+  bucket.cacheWrite5mTokens += request.cacheWrite5mTokens
+  bucket.cacheWrite1hTokens += request.cacheWrite1hTokens
+  bucket.requests.push(request)
   map.set(key, bucket)
 }
 

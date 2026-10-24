@@ -17,22 +17,23 @@ you; never re-derive the merge rule from the turns yourself.
 ## Render exactly two tables
 
 **Table 1 — one row per entry in `groups`:** date, from, to, real working
-time, cost (main), cost (subagent). All times in **Europe/Berlin**, computed
-from each group's `startedAt`/`endedAt`. `activeSeconds` is the real working
-time; `mainCostMicros` / `subagentCostMicros` are dollars at `/ 1_000_000`.
+time, main-thread tokens (`inputTokens + outputTokens + cacheReadTokens +
+cacheWriteTokens`), subagent tokens (`subagentUsageTokens`). All times in
+**Europe/Berlin**, computed from each group's `startedAt`/`endedAt`.
+`activeSeconds` is the real working time.
 
 A record groups by its START day, so a record that begins at 23:58 can
 legitimately END after midnight — e.g. a row reading `02:43 -> 00:02`. That
 is correct, not a bug: only the START of each merged turn has to fall on the
 record's own day, never the end. Do not "fix" such a row.
 
-**Table 2 — one row per cost bucket, from `totals`:** cache read
-(`cacheReadCostMicros`), cache write (`cacheWriteCostMicros`), output
-(`outputCostMicros`), input (`inputCostMicros`), and a total row
-(`costMicros`). Show each bucket's dollar amount and its percentage of the
-total. `main + subagent` (from `totals.costMicros` / `totals.subagentCostMicros`)
-must equal this table's total exactly — if your arithmetic disagrees, you
-mis-added, not the server.
+**Table 2 — one row per token bucket, from `totals`:** cache read
+(`cacheReadTokens`), cache write (`cacheWriteTokens`), output
+(`outputTokens`), input (`inputTokens`), subagents (`subagentUsageTokens`) and
+a total row. There is no cost column, on purpose: the tracker prices the
+tokens with its own model prices (Instanz → KI-Preise) when it books them, so
+any figure shown here could only disagree with what gets booked. Name the
+models (`models`) below the table.
 
 ## If `mergeGapKnown` is `false`
 
@@ -78,15 +79,15 @@ Only once the description is settled, go on to the rest.
 - that every record carries this conversation's own id (`sessionId`), so
   another conversation running in the same project books its own records
   rather than merging into these
-- if `unpricedModels` is non-empty, name them and say those turns book time but
-  zero cost
-- if `totals.subagentCostMicros` is above zero, say how much of the total cost
-  is subagent spend (`subagentCostMicros / 1_000_000`), priced by each
-  subagent's own model — it is included in the booked total, not omitted
+- that the tracker prices the tokens when it books them; a model it has no
+  price for books its tokens at zero cost until an instance admin adds the
+  price on the KI-Preise page and recomputes
+- if `totals.subagentUsageTokens` is above zero, that the subagents' tokens are
+  booked too, each under the subagent's own model
 - if `subagentDataAvailable` is `false`, say plainly that subagent transcript
   data was **not available** for this session (it lives under the OS temp
   directory, which is not durable, and may have been cleared since the
-  session ran) — the booked cost may understate real spend, and this is
+  session ran) — the booked usage may understate real spend, and this is
   different from "no subagents ran"
 
 Ask the user to confirm. **Only if they agree**, book exactly what was shown:

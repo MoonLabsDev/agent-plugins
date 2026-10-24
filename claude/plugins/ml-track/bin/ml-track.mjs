@@ -5,17 +5,9 @@ import { createClient } from '../lib/api.mjs'
 import { readEntries } from '../lib/spool.mjs'
 import { effectiveDescription } from '../lib/description.mjs'
 import { transcriptPath, migrateLegacyLayout, subagentTasksDir } from '../lib/paths.mjs'
-// TABLE_VERSION is intentionally NOT imported here. lib/pricing.mjs reads and
-// parses pricing-table.json at import time — a static top-level import of it
-// would run that read for every verb, including `hook`, before the hook
-// verb's own try/catch is even entered. A missing or corrupt table would
-// then crash the whole process outright: uncaught exception, non-zero exit,
-// a stack trace on stderr, in direct violation of "a hook must never disrupt
-// a turn". Only the `status` verb needs TABLE_VERSION, so it loads
-// lib/pricing.mjs itself, lazily, inside its own guarded path below. (The
-// hook verb's own indirect use of pricing, through buildPayload, already
-// goes through a dynamic import inside its try block — that one was already
-// correct and is unchanged.)
+// No pricing here: a booking carries times and token counts only, and the
+// tracker prices them with its own model prices (Instanz → KI-Preise) when
+// it stores them.
 
 /**
  * One JSON object on stdout, always. The slash commands render it; a human
@@ -171,15 +163,6 @@ try {
     const cfg = readRepoConfig(process.cwd())
     const sessionId = argOf(argv, '--session')
     const entries = sessionId ? readEntries(sessionId) : []
-    // Loaded lazily and guarded: a missing/corrupt pricing-table.json must
-    // degrade `status`'s own pricingTable field to null, not crash the verb
-    // and violate the CLI's "one JSON object on stdout, always" contract.
-    let pricingTable = null
-    try {
-      ;({ TABLE_VERSION: pricingTable } = await import('../lib/pricing.mjs'))
-    } catch {
-      pricingTable = null
-    }
     emit({
       ok: true,
       loggedIn: creds !== null,
@@ -198,7 +181,6 @@ try {
       ...describe(sessionId, process.cwd()),
       pending: entries.filter((e) => e.status === 'pending').length,
       booked: entries.filter((e) => e.status === 'booked').length,
-      pricingTable,
     })
   } else if (verb === 'track') {
     const cfg = readRepoConfig(process.cwd())
@@ -456,7 +438,6 @@ try {
       }
       const { parseTurns } = await import('../lib/transcript.mjs')
       const { buildPayload, idempotencyKeyFor } = await import('../lib/payload.mjs')
-      const { priceUsage } = await import('../lib/pricing.mjs')
 
       // The durability problem (this task's brief): `tasks/` lives under the
       // OS temp directory, not durably like ~/.claude/projects — a backfill
@@ -495,16 +476,13 @@ try {
       const planFile = join(spool.spoolRoot(), `backfill-${sessionId}.json`)
       writeFileSync(planFile, JSON.stringify({ sessionId, entries }, null, 2) + '\n', 'utf8')
 
-      const unpriced = new Set()
+      const models = new Set()
       let spanSeconds = 0
       let activeSeconds = 0
       for (const turn of turns) {
         spanSeconds += turn.spanSeconds
         activeSeconds += turn.activeSeconds
-        for (const bucket of turn.usage) {
-          const priced = priceUsage(bucket)
-          if (priced.unpriced) unpriced.add(priced.model)
-        }
+        for (const bucket of turn.usage) models.add(bucket.model)
       }
 
       // The merge gap is per-agent, stored server-side only
@@ -535,20 +513,11 @@ try {
       const { groupTurns } = await import('../lib/groups.mjs')
       const groups = groupTurns(turns, mergeGapKnown ? mergeGapSeconds : NaN)
 
-      let costMicros = 0
-      let subagentCostMicros = 0
-      let inputCostMicros = 0
-      let outputCostMicros = 0
-      let cacheReadCostMicros = 0
-      let cacheWriteCostMicros = 0
-      for (const g of groups) {
-        costMicros += g.mainCostMicros + g.subagentCostMicros
-        subagentCostMicros += g.subagentCostMicros
-        inputCostMicros += g.inputCostMicros
-        outputCostMicros += g.outputCostMicros
-        cacheReadCostMicros += g.cacheReadCostMicros
-        cacheWriteCostMicros += g.cacheWriteCostMicros
-      }
+      // Tokens, not money: the tracker prices them when it books them, with
+      // the instance's model prices, so this preview cannot know the cost.
+      const TOKEN_KEYS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'subagentUsageTokens']
+      const tokenTotals = Object.fromEntries(TOKEN_KEYS.map((key) => [key, 0]))
+      for (const g of groups) for (const key of TOKEN_KEYS) tokenTotals[key] += g[key]
 
       emit({
         ok: true, planFile, sessionId, project: cfg.project, client: cfg.client, description, descriptionSource,
@@ -561,15 +530,10 @@ try {
         // one per turn — see lib/groups.mjs. Structured, not pre-rendered:
         // commands/backfill.md formats it, but must never re-derive the
         // merge rule itself.
-        groups: groups.map(({ startedAt, endedAt, activeSeconds: groupActiveSeconds, mainCostMicros, subagentCostMicros: groupSubagentCostMicros }) => ({
-          startedAt, endedAt, activeSeconds: groupActiveSeconds, mainCostMicros, subagentCostMicros: groupSubagentCostMicros,
-        })),
+        groups,
         mergeGapSeconds, mergeGapKnown,
-        totals: {
-          turns: turns.length, spanSeconds, activeSeconds, costMicros, subagentCostMicros,
-          inputCostMicros, outputCostMicros, cacheReadCostMicros, cacheWriteCostMicros,
-        },
-        unpricedModels: [...unpriced],
+        totals: { turns: turns.length, spanSeconds, activeSeconds, ...tokenTotals },
+        models: [...models],
         subagentDataAvailable,
       })
     }

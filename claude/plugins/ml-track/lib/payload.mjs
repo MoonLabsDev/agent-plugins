@@ -1,5 +1,3 @@
-import { priceUsage } from './pricing.mjs'
-
 /**
  * Agent records are ALWAYS booked not-billable (spec P4). A human reviews the
  * work and flags it later; the server resolves and stamps the rate at creation
@@ -14,6 +12,20 @@ const BILLABLE = false
  * instead of inserting.
  */
 export const idempotencyKeyFor = (sessionId, turn) => `${sessionId}:${turn.turnUuid}`
+
+/**
+ * One usage in the API's shape. The five token counts only — the server
+ * prices them with the instance's model prices (Instanz → KI-Preise) when it
+ * stores the booking, so a price corrected there reaches every install at
+ * once and this plugin never needs a price table of its own.
+ */
+const tokensOf = (usage) => ({
+  input_tokens: usage.inputTokens,
+  output_tokens: usage.outputTokens,
+  cache_read_tokens: usage.cacheReadTokens,
+  cache_write_short_tokens: usage.cacheWrite5mTokens,
+  cache_write_long_tokens: usage.cacheWrite1hTokens,
+})
 
 /**
  * `sessionId` is REQUIRED and throws when absent, rather than defaulting to
@@ -35,23 +47,18 @@ export function buildPayload(turn, { projectId, description, sessionId }) {
     ended_at: turn.endedAt,
     active_seconds: turn.activeSeconds,
     billable: BILLABLE,
-    costs: turn.usage.map((bucket) => {
-      const priced = priceUsage(bucket)
-      return {
-        model: priced.model,
-        effort: priced.effort,
-        origin: priced.origin,
-        input_tokens: priced.inputTokens,
-        output_tokens: priced.outputTokens,
-        cache_read_tokens: priced.cacheReadTokens,
-        cache_write_tokens: priced.cacheWriteTokens,
-        cost_micros: priced.costMicros,
-        input_cost_micros: priced.inputCostMicros,
-        output_cost_micros: priced.outputCostMicros,
-        cache_read_cost_micros: priced.cacheReadCostMicros,
-        cache_write_cost_micros: priced.cacheWriteCostMicros,
-        currency: priced.currency,
-      }
-    }),
+    costs: turn.usage.map((bucket) => ({
+      model: bucket.model,
+      effort: bucket.effort,
+      // Passed through: origin ('main' vs 'subagent') is an attribution
+      // label transcript.mjs already resolved. 'main' when it never set one.
+      origin: bucket.origin ?? 'main',
+      ...tokensOf(bucket),
+      // Each request's own usage, when the parser kept it: a long-context
+      // price applies per request, by that request's prompt size, and only
+      // the server knows the threshold. Absent, the server prices the whole
+      // entry at the short-context rates.
+      ...(Array.isArray(bucket.requests) ? { requests: bucket.requests.map(tokensOf) } : {}),
+    })),
   }
 }

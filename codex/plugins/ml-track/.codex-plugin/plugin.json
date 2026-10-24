@@ -1,6 +1,6 @@
 {
   "name": "ml-track",
-  "version": "0.3.0+codex.20261024120000",
+  "version": "0.4.0+codex.20261024200000",
   "description": "Book Codex turn time and token cost onto MoonLabs projects",
   "author": {
     "name": "MoonLabs"

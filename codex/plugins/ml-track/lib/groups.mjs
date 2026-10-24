@@ -1,5 +1,3 @@
-import { priceUsage } from './pricing.mjs'
-
 /**
  * Previews the server's own `findMergeTarget` coalescing rule
  * (src/services/time-records.ts, ~line 440) client-side, so
@@ -32,25 +30,28 @@ export function dayKeyBerlin(iso, timeZone = 'Europe/Berlin') {
   }).format(new Date(iso))
 }
 
-/** One turn's cost, split main vs subagent and by the four pricing buckets. */
-function priceTurn(turn) {
-  let mainCostMicros = 0
-  let subagentCostMicros = 0
-  let inputCostMicros = 0
-  let outputCostMicros = 0
-  let cacheReadCostMicros = 0
-  let cacheWriteCostMicros = 0
+/**
+ * One turn's tokens, main thread by bucket and subagents as one count. No
+ * money: the server prices the tokens when it books them (KI-Preise), so a
+ * preview that guessed a price could only disagree with what gets booked.
+ */
+function tokensOfTurn(turn) {
+  const tokens = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, subagentUsageTokens: 0 }
   for (const bucket of turn.usage) {
-    const priced = priceUsage(bucket)
-    if (priced.origin === 'subagent') subagentCostMicros += priced.costMicros
-    else mainCostMicros += priced.costMicros
-    inputCostMicros += priced.inputCostMicros
-    outputCostMicros += priced.outputCostMicros
-    cacheReadCostMicros += priced.cacheReadCostMicros
-    cacheWriteCostMicros += priced.cacheWriteCostMicros
+    const write = bucket.cacheWrite5mTokens + bucket.cacheWrite1hTokens
+    if (bucket.origin === 'subagent') {
+      tokens.subagentUsageTokens += bucket.inputTokens + bucket.outputTokens + bucket.cacheReadTokens + write
+      continue
+    }
+    tokens.inputTokens += bucket.inputTokens
+    tokens.outputTokens += bucket.outputTokens
+    tokens.cacheReadTokens += bucket.cacheReadTokens
+    tokens.cacheWriteTokens += write
   }
-  return { mainCostMicros, subagentCostMicros, inputCostMicros, outputCostMicros, cacheReadCostMicros, cacheWriteCostMicros }
+  return tokens
 }
+
+const TOKEN_KEYS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'subagentUsageTokens']
 
 /**
  * Coalesces turns into the records the server would actually book.
@@ -76,7 +77,7 @@ export function groupTurns(turns, mergeGapSeconds, timeZone = 'Europe/Berlin') {
   const canMerge = Number.isFinite(mergeGapSeconds) && mergeGapSeconds > 0
   const groups = []
   for (const turn of turns) {
-    const priced = priceTurn(turn)
+    const tokens = tokensOfTurn(turn)
     const last = groups[groups.length - 1]
     if (canMerge && last) {
       const gapSeconds = (Date.parse(turn.startedAt) - Date.parse(last.endedAt)) / 1000
@@ -84,12 +85,7 @@ export function groupTurns(turns, mergeGapSeconds, timeZone = 'Europe/Berlin') {
       if (gapSeconds >= 0 && gapSeconds <= mergeGapSeconds && sameStartDay) {
         last.endedAt = turn.endedAt
         last.activeSeconds += turn.activeSeconds
-        last.mainCostMicros += priced.mainCostMicros
-        last.subagentCostMicros += priced.subagentCostMicros
-        last.inputCostMicros += priced.inputCostMicros
-        last.outputCostMicros += priced.outputCostMicros
-        last.cacheReadCostMicros += priced.cacheReadCostMicros
-        last.cacheWriteCostMicros += priced.cacheWriteCostMicros
+        for (const key of TOKEN_KEYS) last[key] += tokens[key]
         continue
       }
     }
@@ -97,7 +93,7 @@ export function groupTurns(turns, mergeGapSeconds, timeZone = 'Europe/Berlin') {
       startedAt: turn.startedAt,
       endedAt: turn.endedAt,
       activeSeconds: turn.activeSeconds,
-      ...priced,
+      ...tokens,
     })
   }
   return groups

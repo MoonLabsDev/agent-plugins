@@ -1,6 +1,6 @@
 /**
  * The ONLY module that speaks HTTP. Everything else takes plain data, which is
- * what lets the parser, the pricing table and the spool be tested without a
+ * what lets the parser, the payload and the spool be tested without a
  * server and reused by a future plugin/codex/ml-track.
  */
 export class ApiError extends Error {

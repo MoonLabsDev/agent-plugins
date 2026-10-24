@@ -1,6 +1,6 @@
 # ml-track
 
-`ml-track` is a Claude Code plugin that books the time and the token cost of
+`ml-track` is a Claude Code plugin that books the time and the token usage of
 an agent's work onto a MoonLabs time-tracker project, automatically, as each
 turn finishes. It reads only Claude Code's own transcript files and speaks
 only to `/api/v1` — it never touches the tracker's database directly.
@@ -73,8 +73,8 @@ claude --plugin-dir /path/to/time-tracker/plugin/claude/ml-track
 | `/ml-track:track [on\|off]` | Turns automatic per-turn booking on or off for this repo. With no argument, reports the current state. |
 | `/ml-track:description [<text>\|--clear]` | Shows, sets or clears this conversation's own description. Empty by default; overrides the repo default while set. |
 | `/ml-track:repo-description [<text>\|--clear]` | Shows, sets or clears the repo-wide default description, used by every conversation in this repo that sets none of its own. Stored in the committed binding file, so it is shared with everyone working in the repo. |
-| `/ml-track:backfill` | Analyses the current conversation for turns not yet booked, shows a table and a total cost, and books them only after you confirm. |
-| `/ml-track:status` | Shows what's configured (login, client, project, tracking on/off), the conversation, repo and effective descriptions, pending vs. booked turn counts, and the pricing table version. |
+| `/ml-track:backfill` | Analyses the current conversation for turns not yet booked, shows a table of the records and their tokens, and books them only after you confirm. |
+| `/ml-track:status` | Shows what's configured (login, client, project, tracking on/off), the conversation, repo and effective descriptions, and pending vs. booked turn counts. |
 
 ### Which description a booking carries
 
@@ -129,12 +129,15 @@ carried. `/ml-track:backfill` reports the omitted subagent token count so
 the gap is visible rather than silent, instead of guessing a model and
 fabricating a precision the data doesn't have.
 
-**An unpriced model books time but zero cost.** If a turn uses a model that
-isn't in `pricing-table.json`, `active_seconds` is still booked correctly,
-but that model's `cost_micros` comes back `0` — the model name is kept, not
-dropped or replaced. A `/ml-track:backfill` dry run surfaces it under
-`unpricedModels`, so a gap in the table shows up instead of silently
-underbilling.
+**The tracker prices, not the plugin.** A booking carries the turn's times
+and, per model, its token counts — input, output, cache read, and the short
+(5-minute) and long (1-hour) cache writes kept apart — plus each request's own
+usage. The tracker costs them with its model prices (Instanz → KI-Preise,
+`/admin/model-prices`, instance admins only) when it stores the booking, and
+keeps the price it used beside the figures, so a later price edit never
+rewrites a booked cost. A model it has no active price for is booked with its
+tokens at zero cost and marked unpriced; once the price is added, the KI-Preise
+page recomputes those bookings. The plugin has no price table of its own.
 
 **The server's idempotency protection is not permanent.** It keys on
 `(company_id, token_id, key)` with a 24h TTL, so `<sessionId>:<turnUuid>`
@@ -145,34 +148,14 @@ directory) and you then backfill a session that was live-booked more than a
 day earlier, every turn in it is inserted a second time — doubled hours and
 cost on that project.
 
-This plugin computes what an agent's work *would have cost at API list
+The booked cost is what an agent's work *would have cost at API list
 price*. It is not an invoice, and it applies no discount, contract rate, or
 markup — treat the figure as a cost-of-delivery estimate, not a bill.
 
-### Adding a model to the pricing table
+### Long context
 
-Edit `pricing-table.json` — that's the only file involved. Add an entry
-under `"models"` keyed by the model name exactly as it appears in the
-transcript's `message.model` field, with five rates, each in **USD per
-million tokens**:
-
-```jsonc
-"claude-some-new-model": {
-  "input": 3.0,        // input tokens
-  "output": 15.0,       // output tokens
-  "cacheRead": 0.3,     // cache-read tokens
-  "cacheWrite5m": 3.75, // cache-write tokens, 5-minute TTL
-  "cacheWrite1h": 6.0   // cache-write tokens, 1-hour TTL
-}
-```
-
-Bump the top-level `"version"` field so `/ml-track:status`'s reported
-pricing table version changes along with it. No code change or restart is
-needed — `lib/pricing.mjs` reads `pricing-table.json` fresh on load, and
-turns already booked keep the rate that applied when they were priced;
-nothing is retroactively repriced.
-
-A row with a missing or non-numeric field in any of the five rates is
-silently dropped from the loaded table entirely, so that model then prices
-as unknown — the same as a model absent altogether — rather than throwing
-or charging a zero rate for just that one field.
+The tracker applies a model's long-context price per REQUEST, by that
+request's prompt size (input + cache reads + cache writes), so the plugin
+sends each request's own usage beside the per-model totals. Every assistant
+entry in a Claude Code transcript is one API request, so the plugin always
+knows it; the threshold and the rates are the tracker's.

@@ -1,7 +1,7 @@
 {
   "name": "ml-track",
   "description": "Book Claude Code time and token cost onto a MoonLabs time-tracker project",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": { "name": "MoonLabs" },
   "keywords": ["time-tracking", "cost", "moonlabs"]
 }
